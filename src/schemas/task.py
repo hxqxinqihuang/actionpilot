@@ -10,7 +10,9 @@ class Deadline(BaseModel):
     normalized_date: str | None = Field(default=None, description="ISO date if confidently inferable.")
     timezone: str | None = Field(default=None, description="Timezone if mentioned or inferable.")
     status: Literal["found", "missing", "ambiguous"] = "found"
+    type: Literal["registration", "submission", "other", "unknown"] = "unknown"
     evidence: str | None = Field(default=None, description="Exact evidence copied from the source text.")
+    evidence_status: Literal["verified", "unverified"] = "verified"
 
     @model_validator(mode="after")
     def validate_missing_deadline(self) -> "Deadline":
@@ -19,6 +21,8 @@ class Deadline(BaseModel):
                 raise ValueError("Missing deadlines must have null raw_text and null normalized_date.")
             if self.evidence is not None:
                 raise ValueError("Missing deadlines cannot include evidence.")
+        if self.normalized_date is not None and not self.raw_text:
+            raise ValueError("Deadlines with normalized_date must include raw_text.")
         return self
 
 
@@ -27,6 +31,7 @@ class Prerequisite(BaseModel):
     description: str | None = None
     required: bool = True
     evidence: str | None = Field(default=None, description="Exact evidence copied from the source text.")
+    evidence_status: Literal["verified", "unverified"] = "verified"
 
 
 class Material(BaseModel):
@@ -34,12 +39,14 @@ class Material(BaseModel):
     description: str | None = None
     required: bool = True
     evidence: str | None = Field(default=None, description="Exact evidence copied from the source text.")
+    evidence_status: Literal["verified", "unverified"] = "verified"
 
 
 class Requirement(BaseModel):
     description: str
     priority: Literal["must", "should", "optional", "unknown"] = "unknown"
     evidence: str | None = Field(default=None, description="Exact evidence copied from the source text.")
+    evidence_status: Literal["verified", "unverified"] = "verified"
 
 
 class Risk(BaseModel):
@@ -68,3 +75,4 @@ class TaskExtractionResult(BaseModel):
     tasks: list[ExtractedTask] = Field(default_factory=list)
     source_language: str | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    warnings: list[str] = Field(default_factory=list)

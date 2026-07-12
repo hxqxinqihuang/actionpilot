@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-pro"
+DEFAULT_MAX_TOKENS = 4096
 
 
 class ConfigError(RuntimeError):
@@ -19,6 +20,7 @@ class AppConfig:
     base_url: str
     model: str
     timeout_seconds: float
+    max_tokens: int
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -40,9 +42,19 @@ class AppConfig:
         if timeout_seconds <= 0:
             raise ConfigError("ACTIONPILOT_TIMEOUT_SECONDS must be greater than 0.")
 
+        max_tokens_raw = os.getenv("ACTIONPILOT_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)).strip()
+        try:
+            max_tokens = int(max_tokens_raw)
+        except ValueError as exc:
+            raise ConfigError("ACTIONPILOT_MAX_TOKENS must be an integer.") from exc
+
+        if max_tokens <= 0:
+            raise ConfigError("ACTIONPILOT_MAX_TOKENS must be greater than 0.")
+
         return cls(
             api_key=api_key,
             base_url=os.getenv("ACTIONPILOT_BASE_URL", DEFAULT_BASE_URL).strip(),
             model=os.getenv("ACTIONPILOT_MODEL", DEFAULT_MODEL).strip(),
             timeout_seconds=timeout_seconds,
+            max_tokens=max_tokens,
         )
