@@ -213,7 +213,7 @@ def test_tasks_style_planner_output_is_converted_without_traceback() -> None:
     plan = PlannerService(provider).generate_plan(make_planner_input())
 
     assert plan.title == "ActionPilot project"
-    assert plan.goal == "Build a structured action app."
+    assert plan.goal != "ActionPilot project"
     assert plan.start_date == date(2026, 7, 12)
     assert plan.target_date == date(2026, 7, 20)
     assert plan.daily_tasks[0].title != "test"
@@ -271,12 +271,22 @@ def test_shallow_title_copy_plan_is_replaced_with_executable_scaffold() -> None:
     assert any("提交" in task.title for task in plan.daily_tasks)
     assert all(task.deliverable and task.deliverable != task.title for task in plan.daily_tasks)
     assert plan.phases
+    assert plan.plan_type == "phase"
+    assert plan.current_focus
+    assert plan.next_actions
+    assert plan.goal != planner_input.task.title
+    assert "作品" in plan.goal or "材料" in plan.goal
+    assert all("Planner returned" not in warning for warning in plan.warnings)
+    assert all("too generic" not in warning for warning in plan.warnings)
+    assert all(phase.key_actions for phase in plan.phases)
+    assert all(phase.deliverable for phase in plan.phases)
 
 
 def test_planner_prompt_requires_action_tasks_not_title_repetition() -> None:
     assert "do not repeat the task title" in PLANNER_SYSTEM_PROMPT
     assert "Every daily task title must start with a concrete action verb" in PLANNER_SYSTEM_PROMPT
     assert "registration form, PPT, demo, code, and validation report" in PLANNER_SYSTEM_PROMPT
+    assert "Choose plan_type by total_days" in PLANNER_SYSTEM_PROMPT
 
 
 def make_planner_input(completed_materials: list[str] | None = None) -> PlannerInput:
@@ -325,7 +335,7 @@ def make_competition_planner_input() -> PlannerInput:
         source_language="中文",
         verified_deadlines=task.deadlines,
         completed_materials=[],
-        start_date=date(2026, 8, 25),
+        start_date=date(2026, 7, 12),
         target_date=date(2026, 9, 5),
         available_hours_per_day=3.0,
         available_days_per_week=7,

@@ -429,6 +429,14 @@ def render_action_plan(plan: ActionPlan) -> None:
     st.write(f"Target date: {plan.target_date.isoformat()}")
     st.write(f"Total days: {plan.total_days}")
     st.write(f"Daily time: {plan.available_hours_per_day:g} hours")
+    st.write(f"Plan type: {plan.plan_type}")
+
+    if plan.current_focus or plan.next_actions:
+        st.markdown("##### Current Focus / Next Actions")
+        if plan.current_focus:
+            st.write(f"Current focus: {plan.current_focus}")
+        for index, action in enumerate(plan.next_actions, start=1):
+            st.write(f"{index}. {action}")
 
     if plan.assumptions or plan.warnings:
         st.markdown("##### Assumptions and Warnings")
@@ -441,10 +449,17 @@ def render_action_plan(plan: ActionPlan) -> None:
         st.markdown("##### Phases")
         for phase in plan.phases:
             st.write(f"{phase.start_date.isoformat()} - {phase.end_date.isoformat()}: {phase.name}")
-            st.caption(phase.objective)
+            st.caption(f"Objective: {phase.objective}")
+            if phase.key_actions:
+                st.write("Key actions:")
+                for action in phase.key_actions:
+                    st.write(f"- {action}")
+            if phase.deliverable:
+                st.write(f"Deliverable: {phase.deliverable}")
 
-    if plan.daily_tasks:
-        st.markdown("##### Daily Timeline")
+    if plan.daily_tasks and plan.plan_type != "phase":
+        timeline_title = "Daily Timeline" if plan.plan_type == "daily" else "Weekly Task Plan"
+        st.markdown(f"##### {timeline_title}")
         for daily_task in plan.daily_tasks:
             st.write(
                 f"{daily_task.date.isoformat()} [{daily_task.priority}] "

@@ -19,8 +19,11 @@ Output schema:
   "target_date": "YYYY-MM-DD",
   "total_days": 1,
   "available_hours_per_day": 2.0,
+  "plan_type": "daily",
+  "current_focus": "string or null",
+  "next_actions": ["string"],
   "assumptions": ["string"],
-  "phases": [{"name": "string", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "objective": "string"}],
+  "phases": [{"name": "string", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "objective": "string", "key_actions": ["string"], "deliverable": "string or null"}],
   "daily_tasks": [{
     "date": "YYYY-MM-DD",
     "title": "string",
@@ -41,7 +44,11 @@ Forbidden top-level keys: tasks, must_do, materials, requirements, confidence.
 Planning rules:
 - Do not use original source text; use only the structured task data in the user message.
 - Transform the notice into student actions; do not repeat the task title as a daily task.
+- Goal must describe what the student needs to complete, not copy the notice title. Example: "Complete the innovation application work, demo, code, and competition material submission."
+- Choose plan_type by total_days: <=7 daily, 8-30 weekly, >30 phase.
+- For long-cycle tasks over 30 days, keep a phase plan with milestones and add current_focus plus next_actions. Do not force a daily task for every day.
 - Infer work stages backward from required materials. For example: registration form, PPT, demo, code, and validation report should become stages for requirement understanding, solution design, technical development/model API integration, demo implementation, testing/user feedback, material packaging, and submission.
+- Each phase must include objective, key_actions, and deliverable.
 - Every daily task title must start with a concrete action verb such as design, draft, implement, test, collect, revise, prepare, submit, 完成, 设计, 开发, 实现, 测试, 整理, 提交.
 - Avoid vague tasks such as "complete the competition plan"; write concrete work like "Complete project solution design, including application scenario, technical route, and functional modules."
 - Every daily task must have a specific deliverable. The deliverable must not be the same as the task title.

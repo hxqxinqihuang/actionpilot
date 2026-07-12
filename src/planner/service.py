@@ -53,6 +53,7 @@ class PlannerService:
         payload = normalize_planner_output_payload(payload, planner_input)
         plan = ActionPlan.model_validate(payload)
         plan = ensure_executable_action_plan(plan, planner_input)
+        plan = polish_action_plan(plan, planner_input)
         validate_generated_plan(
             plan,
             start_date=planner_input.start_date,
@@ -91,7 +92,7 @@ def normalize_planner_output_payload(payload: dict[str, Any], planner_input: Pla
         )
 
     warnings = _string_list(payload.get("warnings"))
-    warnings.append("Planner returned extractor-style tasks; converted them to daily_tasks.")
+    warnings.append("已根据文档要求生成阶段化执行计划。")
     return {
         "title": str(payload.get("title") or planner_input.task.title),
         "goal": str(payload.get("goal") or planner_input.task.summary or planner_input.task.title),
@@ -163,6 +164,8 @@ def build_template_action_plan(planner_input: PlannerInput, *, source_plan: Acti
                 "start_date": phase_date,
                 "end_date": max(phase_date, next_date),
                 "objective": phase["objective"],
+                "key_actions": phase["key_actions"],
+                "deliverable": phase["deliverable"],
             }
         )
         daily_task_payloads.append(
@@ -185,15 +188,20 @@ def build_template_action_plan(planner_input: PlannerInput, *, source_plan: Acti
         )
 
     warnings = list(source_plan.warnings if source_plan is not None else [])
-    warnings.append("Planner result was too generic; ActionPilot generated an executable scaffold from required materials.")
+    warnings.append("文档信息较复杂，已提取核心目标并生成行动方案。")
+    plan_type = _plan_type(total_days)
+    first_phase = phase_specs[0] if phase_specs else None
     return ActionPlan.model_validate(
         {
             "title": (source_plan.title if source_plan is not None else None) or task.title,
-            "goal": (source_plan.goal if source_plan is not None else None) or task.summary or task.title,
+            "goal": _action_goal(task),
             "start_date": planner_input.start_date,
             "target_date": planner_input.target_date,
             "total_days": total_days,
             "available_hours_per_day": planner_input.available_hours_per_day,
+            "plan_type": plan_type,
+            "current_focus": first_phase["name"] if first_phase and plan_type == "phase" else None,
+            "next_actions": first_phase["key_actions"] if first_phase and plan_type == "phase" else [],
             "assumptions": list(source_plan.assumptions if source_plan is not None else []),
             "phases": phase_payloads,
             "daily_tasks": daily_task_payloads,
@@ -202,6 +210,29 @@ def build_template_action_plan(planner_input: PlannerInput, *, source_plan: Acti
             "warnings": warnings,
         }
     )
+
+
+def polish_action_plan(plan: ActionPlan, planner_input: PlannerInput) -> ActionPlan:
+    payload = plan.model_dump()
+    total_days = (planner_input.target_date - planner_input.start_date).days + 1
+    plan_type = _plan_type(total_days)
+    payload["plan_type"] = plan_type
+    if _goal_copies_title(plan.goal, planner_input.task.title):
+        payload["goal"] = _action_goal(planner_input.task)
+    payload["warnings"] = _friendly_warnings(plan.warnings)
+
+    if plan_type == "phase":
+        phases = payload.get("phases") or []
+        if phases:
+            first_phase = phases[0]
+            payload["current_focus"] = payload.get("current_focus") or first_phase.get("name")
+            payload["next_actions"] = payload.get("next_actions") or first_phase.get("key_actions") or _default_next_actions(
+                planner_input.source_language
+            )
+        else:
+            payload["current_focus"] = payload.get("current_focus") or "需求理解与方案设计"
+            payload["next_actions"] = payload.get("next_actions") or _default_next_actions(planner_input.source_language)
+    return ActionPlan.model_validate(payload)
 
 
 def build_execution_blueprint(
@@ -244,6 +275,7 @@ def _chinese_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "需求理解与方案设计",
             "objective": "明确任务目标、应用场景、技术路线和功能模块。",
+            "key_actions": ["分析比赛功能要求", "确定目标用户和应用场景", "设计Agent核心流程", "完成初版技术方案"],
             "task_title": "完成项目方案设计",
             "task_description": "梳理任务要求，确定应用场景、技术路线、功能模块和验收口径。",
             "deliverable": "项目方案设计草稿",
@@ -254,6 +286,7 @@ def _chinese_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "技术开发与模型调用",
             "objective": "完成核心功能、模型/API调用和基础数据流程。",
+            "key_actions": ["实现主要工作流", "完成模型调用", "调试输入输出流程", "处理关键异常场景"],
             "task_title": "开发核心功能并接入模型调用",
             "task_description": "实现主要功能链路，完成模型/API调用、输入输出处理和基础错误处理。",
             "deliverable": "可运行的核心功能代码",
@@ -264,6 +297,7 @@ def _chinese_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Demo实现",
             "objective": "把核心功能整理为可演示的应用流程。",
+            "key_actions": ["完善交互流程", "准备演示样例", "录制或整理Demo说明", "检查演示稳定性"],
             "task_title": "实现可演示Demo流程",
             "task_description": "完善交互流程、示例输入和展示结果，确保演示过程稳定。",
             "deliverable": "可演示Demo",
@@ -274,6 +308,7 @@ def _chinese_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "测试与用户反馈",
             "objective": "验证效果、记录问题并完成必要修改。",
+            "key_actions": ["设计测试样例", "记录效果对比", "收集用户反馈", "整理验证结论"],
             "task_title": "完成测试验证与反馈整理",
             "task_description": "使用典型样例测试功能效果，记录问题、反馈和改进结论。",
             "deliverable": "测试与反馈记录",
@@ -284,6 +319,7 @@ def _chinese_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "材料整理与提交",
             "objective": "完成提交材料检查、格式整理和最终提交。",
+            "key_actions": ["检查报名表和声明文件", "整理PPT与技术报告", "打包代码和Demo材料", "完成最终提交确认"],
             "task_title": "整理并提交最终材料",
             "task_description": "检查报名表、PPT、Demo、代码和报告等材料，按要求命名、打包并提交。",
             "deliverable": "最终提交材料包",
@@ -299,6 +335,7 @@ def _english_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Requirement Understanding and Solution Design",
             "objective": "Clarify the goal, use case, technical route, and modules.",
+            "key_actions": ["Analyze functional requirements", "Define target users and use case", "Design the agent workflow", "Draft the technical solution"],
             "task_title": "Complete solution design",
             "task_description": "Review requirements and define the use case, technical route, functional modules, and acceptance criteria.",
             "deliverable": "Solution design draft",
@@ -309,6 +346,7 @@ def _english_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Technical Development and Model Integration",
             "objective": "Build core functions, model/API integration, and data flow.",
+            "key_actions": ["Implement the main workflow", "Integrate model calls", "Debug input and output flow", "Handle key error cases"],
             "task_title": "Implement core functions and model calls",
             "task_description": "Build the main workflow, integrate model/API calls, and handle inputs, outputs, and basic errors.",
             "deliverable": "Runnable core code",
@@ -319,6 +357,7 @@ def _english_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Demo Implementation",
             "objective": "Package the core function into a stable demo flow.",
+            "key_actions": ["Polish the interaction flow", "Prepare demo examples", "Create demo notes or recording", "Check demo stability"],
             "task_title": "Implement demo workflow",
             "task_description": "Prepare sample inputs, user flow, and output presentation so the demo is stable.",
             "deliverable": "Working demo",
@@ -329,6 +368,7 @@ def _english_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Testing and Feedback",
             "objective": "Validate results, record issues, and make needed improvements.",
+            "key_actions": ["Design test cases", "Record result comparisons", "Collect user feedback", "Summarize validation findings"],
             "task_title": "Run tests and organize feedback",
             "task_description": "Test with typical cases, record issues and feedback, and summarize improvement conclusions.",
             "deliverable": "Test and feedback notes",
@@ -339,6 +379,7 @@ def _english_phase_blueprint(materials: list[Material]) -> list[dict[str, Any]]:
         {
             "name": "Material Packaging and Submission",
             "objective": "Check, format, package, and submit final materials.",
+            "key_actions": ["Check forms and statements", "Prepare slides and technical report", "Package code and demo materials", "Confirm final submission"],
             "task_title": "Prepare and submit final materials",
             "task_description": "Check forms, slides, demo, code, reports, names, and packaging before final submission.",
             "deliverable": "Final submission package",
@@ -380,6 +421,62 @@ def _prefers_chinese(source_language: str | None, texts: list[str]) -> bool:
     if source_language and ("中" in source_language or "chinese" in source_language.lower()):
         return True
     return any(any("\u4e00" <= char <= "\u9fff" for char in text) for text in texts)
+
+
+def _plan_type(total_days: int) -> str:
+    if total_days <= 7:
+        return "daily"
+    if total_days <= 30:
+        return "weekly"
+    return "phase"
+
+
+def _goal_copies_title(goal: str, title: str) -> bool:
+    normalized_goal = re.sub(r"\s+", "", goal).lower()
+    normalized_title = re.sub(r"\s+", "", title).lower()
+    return not normalized_goal or normalized_goal == normalized_title or normalized_title in normalized_goal
+
+
+def _action_goal(task: ExtractedTask) -> str:
+    names = [material.name for material in task.materials]
+    chinese = _prefers_chinese(None, [task.title, task.summary, *names])
+    if chinese:
+        if names:
+            core_materials = "、".join(_short_material_name(name) for name in names[:3])
+            return f"完成作品开发，并完成{core_materials}等任务材料提交。"
+        return "完成任务要求的核心成果，并按截止时间提交所需材料。"
+    if names:
+        core_materials = ", ".join(_short_material_name(name) for name in names[:3])
+        return f"Complete the project deliverable and submit required materials including {core_materials}."
+    return "Complete the required work and submit all required materials before the deadline."
+
+
+def _short_material_name(name: str) -> str:
+    return re.split(r"[（(]", name, maxsplit=1)[0].strip() or name
+
+
+def _friendly_warnings(warnings: list[str]) -> list[str]:
+    internal_markers = (
+        "Planner returned extractor-style tasks",
+        "Planner result was too generic",
+        "converted them to daily_tasks",
+        "executable scaffold",
+    )
+    friendly: list[str] = []
+    for warning in warnings:
+        if any(marker in warning for marker in internal_markers):
+            continue
+        if warning not in friendly:
+            friendly.append(warning)
+    if not friendly:
+        friendly.append("已根据文档要求生成阶段化执行计划。")
+    return friendly
+
+
+def _default_next_actions(source_language: str | None) -> list[str]:
+    if source_language and ("中" in source_language or "chinese" in source_language.lower()):
+        return ["分析任务要求", "确定目标用户和应用场景", "设计核心流程", "完成初版方案"]
+    return ["Analyze task requirements", "Define target users and use case", "Design the core workflow", "Draft the initial solution"]
 
 
 def extract_json_object(raw: str) -> str:
